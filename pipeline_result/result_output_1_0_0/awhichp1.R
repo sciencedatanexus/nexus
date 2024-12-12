@@ -154,8 +154,8 @@ top10_data <- cleaned_data %>%
     labs( 
       x = "Funding organisations", 
       y = "Count of projects",
-      title = "Spread of the research projects by funding organsations",
-      subtitle= paste0("Estimates the organisations that support this scientific capability (N: ", total_nb, " projects, from n:",subtotal," records)."),
+      title = "Largest funding organisations by number of projects",
+      subtitle= paste0("Estimates which organisations support the scientific capability (N: ", total_nb, " projects, identified on n:",subtotal," records)."),
       caption="Brought to you by The Lens.org data."
     )+
     theme_ipsum(base_size = ui_font_size) +

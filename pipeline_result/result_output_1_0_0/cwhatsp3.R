@@ -142,8 +142,8 @@ rplot_cwhatsp3 <- function(
     labs( 
       x = "Journal", 
       y = "Share of records (%)",
-      title = "Spread of the scientific publications by journals",
-      subtitle= paste0("Estimates the community of practice that underpin this scientific capability (N: ", total_nb, ")."),
+      title = "Spread of scientific publications by their source (journals)",
+      subtitle= paste0("Estimates communities of practice that underpins a scientific capability (N: ", total_nb, ")."),
       caption="Brought to you by The Lens.org data."
     )+
     theme(legend.position = "none")

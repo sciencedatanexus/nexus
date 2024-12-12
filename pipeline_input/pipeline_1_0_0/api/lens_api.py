@@ -30,6 +30,7 @@ class GetLensData:
     def __init__(self,
                  api_configuration,
                  query_string,
+                 query_parameters=None, ## API query string
                  page_start=0,
                  page_size=100,  ## maximum value is 100 for patents
                  aggregation_string=None,
@@ -47,7 +48,8 @@ class GetLensData:
         # =============================================================================
         # Global attributes
         # =============================================================================
-        self.query_string= query_string
+        self.query_string= query_string  ## ex: {"bool": {"must":[{'match': {'author.last_name': 'Kondratyev'}}]}}
+        self.query_parameters= query_parameters ## ex: [{"bool": {"must":[{"match": {"publication_type": "journal article"}}]}}]
         self.page_start= page_start
         self.page_size= page_size
         self.aggregation_string= aggregation_string
@@ -94,7 +96,15 @@ class GetLensData:
         if isinstance(new_query_string, dict):
             self._query_string = new_query_string
         else:
-            raise ValueError("Please enter a valid query string")
+            raise ValueError("Please enter a valid query parameters")
+
+    @property
+    def query_parameters(self):
+        return self._query_parameters
+
+    @query_parameters.setter
+    def query_parameters(self, new_query_parameters):
+        self._query_parameters = new_query_parameters
 
     @property
     def page_start(self):
@@ -202,7 +212,7 @@ class GetLensData:
     # =============================================================================
     # Methods
     # =============================================================================
-    def get_lens_data(self):
+    def get_lens_data(self, start_year, end_year):
         # Retrieve Lens data from a query.
         # Returns: 1 panda dataframe objects with data fields:
         #   df = list of lens_id
@@ -267,10 +277,23 @@ class GetLensData:
             df = pd.DataFrame()
             df_aggregation = pd.DataFrame()  
             nb_total = 0
+            max_score = 0
+            query_strategy = {
+                                "bool": 
+                                    {
+                                    "must": 
+                                        [
+                                            self._query_string # include the topic search strategies
+                                        ]
+                                    }
+                            } 
+            if self._query_parameters:
+                query_strategy['bool']['must'] = query_strategy['bool']['must'] +  self._query_parameters # add any common query parameters (eg document types)
             if self._aggregation_string:
+                query_strategy['bool']['must'] = query_strategy['bool']['must'] + [{"range": {"year_published": {"gte": start_year, "lte": end_year}}}] # restrict by year
                 url = '{}{}'.format(self._api_configuration['endpoint'], 'aggregate')
                 json_params = {
-                    "query": self._query_string,
+                    "query": query_strategy,
                     "aggregations": self._aggregation_string,
                     "size": 0,
                     "stemming": self._api_stemming,
@@ -278,56 +301,61 @@ class GetLensData:
                     # "min_score": self._api_min_score
                 }
             else:
-                url = '{}{}'.format(self._api_configuration['endpoint'], 'search')
-                # self._page_size = self._page_size
-                json_params = {
-                    "query": self._query_string,
-                    "size": self._page_size,
-                    "sort": self._api_sort,
-                    "exclude": self._api_exclude,
-                    "scroll": "1m",
-                    "stemming": self._api_stemming,
-                    "regex": self._api_regex,
-                    "min_score": self._api_min_score
-                }
-                if self._api_include:
-                    json_params["include"] = self._api_include,
-            json_query = json.dumps(json_params)  ## format the python dictionary into json (notably for parameters with null values)
-            method = 'POST'
-            token = 'Bearer {}'.format(self._api_configuration['apikey'])
-            headers = {'Authorization': token, 'Content-Type': 'application/json'}
-            query_response = request_retry(json_query, headers, method, url, max_tries=10)
-            if query_response.status_code == 200:
-                r = query_response.json()
-                nb_total = r['total']
-                nb_results = r['results']
-                max_score = r['max_score']
-                data = r['data']
-                df = pd.DataFrame(data)
-                if self._aggregation_string:
-                        df_aggregation = r['aggregations']
-                else:
-                    if nb_total > 0:
-                        data = r['data']
-                        df = pd.json_normalize(data, errors='ignore')
-                        if nb_total > nb_results:
-                            if r["scroll_id"]:
-                                json_params = {"scroll": "1m", "scroll_id": r['scroll_id'], "include": self._api_include }
-                                for i in range(nb_results, nb_total, self._page_size):
-                                    json_query = json.dumps(json_params)
-                                    query_response = request_retry(json_query, headers, method, url, max_tries=10)
-                                    r_id = query_response.json()
-                                    if r_id["scroll_id"]:
-                                        json_params["scroll_id"] = r_id['scroll_id']
-                                        data_id = r_id['data']
-                                        max_score = r['max_score']
-                                        d_id = pd.json_normalize(data_id, errors='ignore')
-                                        d_id['score'] = max_score
-                                        df = pd.concat([df, d_id])
-                                        i += self._page_size
+                for py in range(end_year, start_year -1,  -1):
+                    query_strategy['bool']['must'] = query_strategy['bool']['must'] + [{"match": {"year_published": py}}] # restrict by year
+                    url = '{}{}'.format(self._api_configuration['endpoint'], 'search')
+                    # self._page_size = self._page_size
+                    json_params = {
+                        "query": query_strategy,
+                        "size": self._page_size,
+                        "sort": self._api_sort,
+                        "exclude": self._api_exclude,
+                        "scroll": "1m",
+                        "stemming": self._api_stemming,
+                        "regex": self._api_regex,
+                        "min_score": self._api_min_score
+                    }
+                    if self._api_include:
+                        json_params["include"] = self._api_include,
+                    json_query = json.dumps(json_params)  ## format the python dictionary into json (notably for parameters with null values)
+                    method = 'POST'
+                    token = 'Bearer {}'.format(self._api_configuration['apikey'])
+                    headers = {'Authorization': token, 'Content-Type': 'application/json'}
+                    query_response = request_retry(json_query, headers, method, url, max_tries=10)
+                    if query_response.status_code == 200:
+                        r = query_response.json()
+                        nb_total = r['total']
+                        if self._aggregation_string:
+                                df_aggregation = r['aggregations']
+                        else:
+                            if nb_total > 0:
+                                nb_results = r['results']
+                                max_score = r['max_score']
+                                data = r['data']
+                                df_py = pd.json_normalize(data, errors='ignore')
+                                df = pd.concat([df, df_py])
+                                print("\t\t", nb_total, "records in", py)
+                                if nb_total > nb_results:
+                                    if r["scroll_id"]:
+                                        json_params = {"scroll": "1m", "scroll_id": r['scroll_id'], "include": self._api_include }
+                                        for i in range(nb_results, nb_total, self._page_size):
+                                            json_query = json.dumps(json_params)
+                                            query_response = request_retry(json_query, headers, method, url, max_tries=10)
+                                            if query_response.status_code == 200:
+                                                r_id = query_response.json()
+                                                print("\t\t\t", i, "records retrieved for ", py)
+                                                if r_id["scroll_id"]:
+                                                    json_params["scroll_id"] = r_id['scroll_id']
+                                                    data_id = r_id['data']
+                                                    max_score = r['max_score']
+                                                    d_id = pd.json_normalize(data_id, errors='ignore')
+                                                    d_id['score'] = max_score
+                                                    df = pd.concat([df, d_id])
+                                                    i += self._page_size
         finally:
+            nb_total = df.shape[0]
             print('\t Last Lens data retrieved')
-            print(df.shape[0])
+            # print(df.shape[0])
             return df, df_aggregation, nb_total, max_score
     # =============================================================================
     # Pipeline steps

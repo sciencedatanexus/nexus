@@ -160,7 +160,7 @@ top10_data <- cleaned_data %>%
       x = "Funding organisations", 
       y = "Count of projects",
       title = "Spread of the research projects by funding organsations",
-      subtitle= paste0("Estimates the organisations that support this scientific capability (N: ", total_nb, " projects, from n:",subtotal," records)."),
+      subtitle= paste0("Estimates the organisations that support a scientific capability (N: ", total_nb, " projects, from n:",subtotal," records)."),
       caption="Brought to you by The Lens.org data."
     )+
     theme(legend.position = "right")

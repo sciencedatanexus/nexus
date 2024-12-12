@@ -135,7 +135,7 @@ eda_plot <- ggplot(cleaned_data, aes(x = year_published, y= nb_records)) +
     x = "Publication year", 
     y = "Count of records",
     title = "Evolution of the number of scolarly publications",
-    subtitle= paste0("Estimates the overall capability (N: ", total_nb, ")."),
+    subtitle= paste0("Estimates changes in an overall capability (N: ", total_nb, ", latest year in incomplete)."),
     caption="Brought to you by The Lens.org data."
   ) +
   theme(legend.position=NULL) +

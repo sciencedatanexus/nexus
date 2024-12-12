@@ -133,17 +133,17 @@ rplot_cwhatsp2 <- function(
     scale_y_comma() +
     # scale_fill_ipsum() + 
     scale_fill_viridis_d() +
-    geom_text(aes(label = publication_type), hjust = 1.1, size = ui_font_size-2) + 
+    # geom_text(aes(label = publication_type), hjust = 1.1, size = ui_font_size-2) + 
     labs( 
       x = "Record type", 
       y = "Share of records (%)",
-      title = "Spread of the scientific publications by types of records",
-      subtitle= paste0("Estimates how research is published that underpin this scientific capability (N: ", total_nb, ")."),
+      title = "Spread of the scientific publications by type",
+      subtitle= paste0("Estimates how the research that underpins a scientific capability is published (N: ", total_nb, ")."),
       caption="Brought to you by The Lens.org data."
     ) +
       theme(
         legend.position = "none", 
-        axis.text.y = element_blank(),
+        # axis.text.y = element_blank(),
         axis.ticks.y = element_blank()
     )
   eda_plot <- ggplot_theme_style(eda_plot, ui_font_size)

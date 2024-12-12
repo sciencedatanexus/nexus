@@ -213,47 +213,46 @@ def generate_categories_oatopics(df, rec_id, source_baseline_version):
     df['is_not_linked'] = df.groupby(rec_id)['category_id'].transform(lambda x: all([pd.isna(element) for element in x]))
     return df
 def create_table_categories(df, rec_id, conn, label, source_baseline_version):
-    # sql_code = "drop TABLE if exists project.{}categories;".format(label)
-    # conn.execute(sql_code)
+    sql_code = "drop TABLE if exists project.{}categories;".format(label)
+    conn.execute(sql_code)
     sql_code = "drop TABLE if exists project.{}categories_openalex_concepts;".format(label)
     conn.execute(sql_code)
-    # sql_code = "drop TABLE if exists project.{}categories_openalex_topics;".format(label)
-    # conn.execute(sql_code)
-    # """Records table - FOS"""
-    # d = df[[rec_id, 'fields_of_study']].copy()
-    # d.dropna(how='any', inplace=True)
-    # d = d.explode('fields_of_study')
-    # d['category_id'] = pd.NA
-    # d['category_id'] = d['category_id'].astype('category')
-    # d.rename(columns={'fields_of_study': 'value'}, inplace=True)
-    # d['qualifier'] = pd.NA
-    # d['qualifier_id'] = pd.NA
-    # d['type'] = 'fields_of_study'
-    # d['type'] = d['type'].astype('category')
-    # """Records table - MESH"""
-    # m = df[[rec_id, 'mesh_terms']].copy()
-    # m.dropna(how='any', inplace=True)
-    # m = m.explode('mesh_terms')
-    # dict_df = m['mesh_terms'].apply(pd.Series)
-    # m = pd.concat([m.drop('mesh_terms', axis=1), dict_df], axis=1)
-    # m.rename(columns={'mesh_heading':'value', 'mesh_id': 'category_id', 'qualifier_name':'qualifier'}, inplace=True)
-    # m['type'] = 'mesh_terms'
-    # dm = pd.concat([d, m], ignore_index=True)
-    # dm['type'] = dm['type'].astype('category')
-    # sql_code = "CREATE TABLE project.{}categories AS SELECT * FROM dm;".format(label)
-    # conn.execute(sql_code)
-    # # conn.sql("select type, count(*) from project.categories group by type;")  # check DuckDB table
+    sql_code = "drop TABLE if exists project.{}categories_openalex_topics;".format(label)
+    conn.execute(sql_code)
+    """Records table - FOS"""
+    d = df[[rec_id, 'fields_of_study']].copy()
+    d.dropna(how='any', inplace=True)
+    d = d.explode('fields_of_study')
+    d['category_id'] = pd.NA
+    d['category_id'] = d['category_id'].astype('category')
+    d.rename(columns={'fields_of_study': 'value'}, inplace=True)
+    d['qualifier'] = pd.NA
+    d['qualifier_id'] = pd.NA
+    d['type'] = 'fields_of_study'
+    d['type'] = d['type'].astype('category')
+    """Records table - MESH"""
+    m = df[[rec_id, 'mesh_terms']].copy()
+    m.dropna(how='any', inplace=True)
+    m = m.explode('mesh_terms')
+    dict_df = m['mesh_terms'].apply(pd.Series)
+    m = pd.concat([m.drop('mesh_terms', axis=1), dict_df], axis=1)
+    m.rename(columns={'mesh_heading':'value', 'mesh_id': 'category_id', 'qualifier_name':'qualifier'}, inplace=True)
+    m['type'] = 'mesh_terms'
+    dm = pd.concat([d, m], ignore_index=True)
+    dm['type'] = dm['type'].astype('category')
+    sql_code = "CREATE TABLE project.{}categories AS SELECT * FROM dm;".format(label)
+    conn.execute(sql_code)
+    # conn.sql("select type, count(*) from project.categories group by type;")  # check DuckDB table
     sql_query = "SELECT * from project.{}categories;".format(label)
     dm = conn.execute(sql_query).fetchdf()
     categories_openalex = generate_categories_oaconcepts(dm, rec_id, source_baseline_version)
     sql_code = "CREATE TABLE project.{}categories_openalex_concepts AS SELECT * FROM categories_openalex;".format(label)
     conn.execute(sql_code)
-    # categories_openalex = generate_categories_oatopics(dm, rec_id, source_baseline_version)
-    # sql_code = "CREATE TABLE project.{}categories_openalex_topics AS SELECT * FROM categories_openalex;".format(label)
-    # conn.execute(sql_code)
-    # print("\t\t table_categories, table_categories_openalex_concepts, table_categories_openalex_topics ")
-    # conn.sql("select level, count(*) from project.categories_openalex_topics group by level;")  # check DuckDB table
-    # t = pd.read_pickle('/Users/jfd/Documents/sciencedatanexus/data/project_sandbox/project_sandbox_topics_nodes.pkl')
+    categories_openalex = generate_categories_oatopics(dm, rec_id, source_baseline_version)
+    sql_code = "CREATE TABLE project.{}categories_openalex_topics AS SELECT * FROM categories_openalex;".format(label)
+    conn.execute(sql_code)
+    print("\t\t table_categories, table_categories_openalex_concepts, table_categories_openalex_topics ")
+    conn.sql("select level, count(*) from project.categories_openalex_topics group by level;")  # check DuckDB table
 def create_table_contributors_id(aut_ids, conn, label):
     """Contributor ids table"""
     sql_code = "drop TABLE if exists project.{}contributors_id;".format(label)
@@ -351,9 +350,15 @@ def generate_collaboration_network(rec_id, publications_df, network_sample_size=
     # Step 9: Create nodes DataFrame
     list_nodes = sorted(set(o['from']).union(o['to']))
     nodes = pd.DataFrame(list_nodes, columns=['org_id'])
-
+    # Step 10: add nodes metrics
+    publications_df['nb'] = publications_df.groupby(rec_id)['org_id'].transform('count')
+    n = publications_df.groupby('org_id').agg(
+        nb_contributions=("nb", lambda x: sum(1/x)),
+        nb_records=(rec_id, "nunique")
+        )
+    nodes = nodes.merge(n, on='org_id', how = 'left')
     return o, nodes
-def create_table_contribution_information(df, rec_id, conn, label, source_baseline_version, net_sample):
+def create_table_contribution_information(df, rec_id, conn, label, source_baseline_version):
     """Contributor table"""
     sql_code = "drop TABLE if exists project.{}net_org_edges;".format(label)
     conn.execute(sql_code)
@@ -367,10 +372,6 @@ def create_table_contribution_information(df, rec_id, conn, label, source_baseli
     conn.execute(sql_code)
     sql_code = "drop TABLE if exists project.{}locations;".format(label)
     conn.execute(sql_code)
-    sql_code = "drop TABLE if exists project.{}net_org_edges;".format(label)
-    conn.execute(sql_code)
-    sql_code = "drop TABLE if exists project.{}net_org_nodes;".format(label)
-    conn.execute(sql_code)    
     d = df[[rec_id, 'authors']].copy()
     d = d.explode('authors').reset_index(drop=True)
     d['author_position'] = d.groupby(rec_id).cumcount() + 1
@@ -431,20 +432,31 @@ def create_table_contribution_information(df, rec_id, conn, label, source_baseli
     sql_code = "CREATE TABLE project.{}affiliation AS SELECT * FROM aff;".format(label)
     conn.execute(sql_code)
     # conn.sql("select count(*) as n from project.affiliation;")  # check DuckDB table
-    """ Add network data (edges, nodes) """
+    print("\t\t table_contribution_information")
+
+def create_table_network_organisations(rec_id, conn, label, max_team_size=20, net_sample=None):
+    # max_team_size: the maximum number of authors per paper to include as collaborations, by default = 20
+    sql_code = "drop TABLE if exists project.{}net_org_edges;".format(label)
+    conn.execute(sql_code)
+    sql_code = "drop TABLE if exists project.{}net_org_nodes;".format(label)
+    conn.execute(sql_code)    
     aff = conn.sql("SELECT * FROM project.affiliation;").fetchdf()
     org = conn.sql("SELECT * FROM project.organisations;").fetchdf()
+    rec = conn.sql("SELECT {} FROM project.records where nb_authors <= {};".format(rec_id, max_team_size)).fetchdf()
     df = conn.sql("SELECT {}, contribution_id FROM project.contribution".format(rec_id)).fetchdf()
+    df = df.merge(rec, on=rec_id, how='inner') ## limit collaborations to 0-20 authors
     publications_df = df.merge(aff, on="contribution_id", how='left')
+    del aff, rec
     df_e, df_n = generate_collaboration_network(rec_id, publications_df, network_sample_size=net_sample)
     df_n = df_n.merge(org, on='org_id', how='inner')
     sql_code = "CREATE TABLE project.{}net_org_nodes AS SELECT * FROM df_n;".format(label)
     conn.execute(sql_code)
     sql_code = "CREATE TABLE project.{}net_org_edges AS SELECT * FROM df_e;".format(label)
     conn.execute(sql_code)
-    conn_bas.close()
-    print("\t\t table_contribution_information with network data")
+    # conn_bas.close()
+    print("\t\t network data tables (edges, nodes)")
     # conn.sql("select country_code, count(*) as n from project.organisations group by country_code order by n Desc limit 10;")  # check 
+
 def create_table_funding(df, rec_id, conn, label):
     """External ids table"""
     d = df[[rec_id, 'funding']].copy()
@@ -457,7 +469,7 @@ def create_table_funding(df, rec_id, conn, label):
     conn.execute(sql_code)
     # conn.sql("select count(*) from project.records_id;")  # check DuckDB table
     print("\t\t table_funding")
-def create_ddb(infile, outfile, project_variant_string, source_baseline_version, source_data="lens_scholarly", network_sample_size=None):
+def create_ddb(infile, outfile, project_variant_string, source_baseline_version, source_data="lens_scholarly", network_max_team_size=20, network_sample_size=None):
     # infile = a pandas DF with raw data from xml or API for records (eg Lens, OpenAlex)
     # outfile = a DuckDB (.duckdb) DB
     # uid = the label of the header which contains the records unique identifiers (eg: lens_id, openalex)
@@ -469,36 +481,24 @@ def create_ddb(infile, outfile, project_variant_string, source_baseline_version,
         conn.execute(sql_code)
         if source_data=="lens_scholarly":
             uid = "lens_id"
-            df = pd.read_pickle(infile)
-            """ Data cleaning"""
-            def_source = [
-                'source.title',
-                'source.publisher',
-                'source.issn',
-                'source.type',
-                'source.country'
-                ]
-            for i in def_source:
-                df[i] = df[i].fillna('other')
-            """ CSV source adaptation """
-            # df = pd.read_csv(infile, sep="|")
-            # for i in ['funding', 'authors', 'mesh_terms', 'fields_of_study','source.issn', 'external_ids']:
-            #     df[i] = df[i].fillna("[]")
-            # df['funding'] = df['funding'].apply(ast.literal_eval)  # CSV source adaptation
-            # df['authors'] = df['authors'].apply(ast.literal_eval)  # CSV source adaptation
-            # df['mesh_terms'] = df['mesh_terms'].apply(ast.literal_eval)  # CSV source adaptation
-            # df['fields_of_study'] = df['fields_of_study'].apply(ast.literal_eval)  # CSV source adaptation
-            # df['source.issn'] = df['source.issn'].apply(ast.literal_eval)  # CSV source adaptation
-            # df['external_ids'] = df['external_ids'].apply(ast.literal_eval)  # CSV source adaptation
-            # infile = infile.replace(".txt", ".pkl")
-            # df.to_pickle(infile)
-            """ CSV source adaptation """
+            df = pd.DataFrame()
+            # df = pd.read_pickle(infile)
+            # def_source = [
+            #     'source.title',
+            #     'source.publisher',
+            #     'source.issn',
+            #     'source.type',
+            #     'source.country'
+            #     ]
+            # for i in def_source:
+            #     df[i] = df[i].fillna('other')
             # create_table_records_id(df, uid, conn, project_variant_string)
             # list_source = create_table_source(df, def_source, conn, project_variant_string)
             # create_table_records(df, list_source, uid, conn, project_variant_string)
-            create_table_categories(df, uid, conn, project_variant_string, source_baseline_version)
-            # create_table_contribution_information(df, uid, conn, project_variant_string, source_baseline_version,network_sample_size)
+            # create_table_categories(df, uid, conn, project_variant_string, source_baseline_version)
+            # create_table_contribution_information(df, uid, conn, project_variant_string, source_baseline_version)
             # create_table_funding(df, uid, conn, project_variant_string)
+            create_table_network_organisations(uid, conn, project_variant_string, network_max_team_size, network_sample_size)
         elif source_data == "lens_patents":
             uid = "lens_id"
             print("\t Lens patents data not implemented yet")

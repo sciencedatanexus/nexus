@@ -30,6 +30,7 @@ import yaml ## pyyaml module
 from .api.lens_api import *
 from .api.openalex_api import *
 from .api.ror_api import *
+from .api.search_strategy import load_search_strategy
 from .core.ddb_data import *
 from .core.ddb_baselines import *
 """
@@ -74,7 +75,7 @@ class DataPipeLine:
         self.data_dir = data_dir
         self.wdir = root_dir  # for instance "~/code/nexus/project_dir_name"
         self.outdir = data_dir  # for instance "~/data/project_name"
-        self.lib_dir = sys.modules["pipeline_input.pipeline"].__path__[0]  ## version of the module"
+        self.lib_dir = sys.modules["nexus.pipeline_input.pipeline"].__path__[0]  ## version of the module"
         self.tempdir = data_dir
         self.configfile = configfile  # yaml configuration file, for instance: "~/config.yaml"
         '''
@@ -198,8 +199,8 @@ class DataPipeLine:
         return self._wdir
 
     @wdir.setter
-    def wdir(self, new_root_dir):
-        if isinstance(new_root_dir, str):
+    def wdir(self, new_wdir):
+        if isinstance(self._root_dir, str):
             self._wdir = os.path.join(self._root_dir, self._project_dir_name, "input")
             # for instance: "D:\MyProjects\\project_dir_name\\", can be different to allow more than one pipeline in a single WDIR
         else:
@@ -390,30 +391,63 @@ class DataPipeLine:
         if not os.path.exists(self._tempdir):
             os.mkdir(self._tempdir)
         if not os.path.exists(os.path.join(self._tempdir, '{}records_dataset.parquet'.format(project_variant_string))):
-            infile = os.path.join(self._wdir, "config", "search_strategy.yaml")
+            # infile = os.path.join(self._wdir, "config", "search_strategy.yaml")
+            infile = os.path.join(self._root_dir, "config", "search_strategy.yaml")
             with open(infile, 'r') as f:
                 search_strategy = yaml.safe_load(f)
             # print(len(search_strategy))
-            for i in search_strategy.keys():  ## iterate on the Lens searches
-                if i.isin(['lens_scholarly', 'lens_patents']):
-                    for j in ['main', 'secondary']:  ## iterate on main or secondary
-                        for k in search_strategy[i][j]['topics']: # iterates on the topics
-                            if i == 'lens_patents':
-                                lens = GetLensData(api_configuration= self._api_config_lensp,
+            search_strategy = load_search_strategy(infile)
+            # ss = search_strategy.loc[search_strategy.source.isin(['lens_scholarly', 'lens_patents']) & search_strategy.category.isin(['main', 'secondary'])]
+            """ Run the Lens API for the main searches"""
+            ss = search_strategy.loc[(search_strategy.source == 'lens_scholarly') & (search_strategy.category == 'main')]
+            nb_searches =ss.shape[0]
+            if nb_searches > 0:
+                uids = pd.DataFrame()
+                sectors = pd.DataFrame()
+                lens = GetLensData(api_configuration= self._api_config_lensp,
                                     query_string= None,
-                                    page_size=100,
+                                    query_parameters=None, 
+                                    page_size=1000,
                                     aggregation_string=None,
-                                    api_type='patents',
+                                    api_type='scholarly',
                                     api_sort=[{"relevance":"desc"}, {"year_published": "desc"}],
                                     api_include= None,
                                     api_exclude=None,
                                     api_stemming=True,
                                     api_regex=False,
-                                    api_min_score=0         
+                                    api_min_score=0 
                                 )
-                            else:
-                                lens = GetLensData(api_configuration= self._api_config_lensp,
+                for i in ss.index:
+                    topic = ss.loc[ss.index == i,].iloc[0]['id']
+                    lens.query_string = ss.loc[ss.index == i,].iloc[0]['value']
+                    df, df_aggregation, nb_total, max_score = lens.get_lens_data(self._project_start_year, self._project_end_year) 
+                    outfile = os.path.join(self._tempdir, '{}{}_{}_raw.pkl'.format(
+                        project_variant_string,
+                        lens.api_type,
+                        topic
+                        )
+                    )
+                    df.to_pickle(outfile)
+                    uids = uids.merge(df[[self._uid, topic, "score"]], on=self._uid, how='outer')
+                    sectors = pd.concat([sectors, df])
+                # uids['n'] = nb_searches
+                # uids['ranking'] = uids[search_strategy[i][j]['topics']].max(axis=1, numeric_only=True)
+                # if self.min_relevance > 0:
+                #     uids = uids[uids['score'] >= self.min_relevance]  ## only returns results above relevance threshold
+                uids.drop_duplicates(inplace=True)
+                sectors.sort_values(by=[self._uid, 'score'], ascending=False, inplace=True)
+                sectors.drop_duplicates(subset=[self._uid], keep='first', inplace=True)
+                uids = uids.merge(sectors, on=self._uid, how='left')
+                uids.to_pickle(os.path.join(self._tempdir, '{}{}records_topics.pkl'.format(project_variant_string, 'lens_scholarly')))
+                sectors.to_pickle(os.path.join(self._tempdir, '{}{}_raw.pkl'.format(project_variant_string, 'lens_scholarly')))
+                    
+            """ Run the Lens API for the secondary searches with aggregates"""
+            ss = search_strategy.loc[(search_strategy.source == 'lens_scholarly') & (search_strategy.category == 'secondary')]
+            ss_agg = search_strategy.loc[(search_strategy.source == 'lens_scholarly') & (search_strategy.category == 'aggegation')]
+            if ss.shape[0] > 0:
+                lens = GetLensData(api_configuration= self._api_config_lensp,
                                     query_string= None,
+                                    query_parameters=None, 
                                     page_size=100,
                                     aggregation_string=None,
                                     api_type='scholarly',
@@ -424,75 +458,132 @@ class DataPipeLine:
                                     api_regex=False,
                                     api_min_score=0 
                                 )
-                            topic = list(k.keys())[0]
-                            lens.query_string = list(k.values())[0]
-                            aggregations = search_strategy[i]['aggregations']
-                            for agg in aggregations:
-                                table = list(agg.keys())[0]
-                                lens.aggregation_string = list(agg.values())[0]
-                                df, df_aggregation, nb_total = lens.get_lens_data() 
-                                outfile = os.path.join(self._tempdir, '{}{}_{}_{}.pkl'.format(
-                                    project_variant_string,
-                                    lens.api_type,
-                                    topic,
-                                    table
-                                    )
+                for i in ss.index:
+                    if ss_agg.shape[0] > 0:
+                        for agg in ss_agg:
+                            lens.query_string = ss.loc[ss.index == i,].iloc[0]['value']
+                            lens.aggregation_string = ss_agg.loc[ss_agg.index == agg,].iloc[0]['value']
+                            topic = ss.loc[ss.index == i,].iloc[0]['id']
+                            table = ss_agg.loc[ss_agg.index == agg,].iloc[0]['id']
+                            df, df_aggregation, nb_total, max_score = lens.get_lens_data(self._project_start_year, self._project_end_year) 
+                            outfile = os.path.join(self._tempdir, '{}{}_{}_{}_aggregate.pkl'.format(
+                                project_variant_string,
+                                lens.api_type,
+                                topic,
+                                table
                                 )
-                                df_aggregation.to_pickle(outfile)
-                            if j == 'main':
-                                lens.aggregation_string = None
-                                df, df_aggregation, nb_total = lens.get_lens_data() 
-                                outfile = os.path.join(self._tempdir, '{}{}_{}_raw.pkl'.format(
-                                    project_variant_string,
-                                    lens.api_type,
-                                    topic
-                                    )
-                                )
-                                df.to_pickle(outfile)
-            for i in search_strategy.keys():  ## iterate on the Lens searches
-                if i.isin(['lens_scholarly', 'lens_patents']):
-                    for j in ['main', 'secondary']:  ## iterate on main or secondary
-                        uids = pd.DataFrame()
-                        sectors = pd.DataFrame()
-                        for k in search_strategy[i][j]['topics']: # iterates on the topics
-                            if i == 'lens_patents':
-                                lens.api_type = 'patents'
-                            else:
-                                lens.api_type = 'scholarly'
-                            topic = list(k.keys())[0]
-                            for agg in search_strategy[i]['aggregations']:
-                                table = list(agg.keys())[0]
-                                print(table)
-                            if j == 'main':
-                                outfile = os.path.join(self._tempdir, '{}_{}_raw.pkl'.format(
-                                    project_variant_string,
-                                    lens.api_type,
-                                    topic
-                                    )
-                                )
-                                df = pd.read_pickle(outfile)
-                                # df.sort_values(by=['uid', 'py', topic], ascending=[False, True, False], inplace=True)  ## remove duplicates when publications are in 2 different years
-                                # df.drop_duplicates(subset=['uid'], keep='first', inplace=True)
-                                # df['topic'] = topic
-                                # # df['ranking'] = df[topic]
-                                # if topic == list(search_strategy[i][j]['topics'].keys())[0]:
-                                #     uids = df[[self._uid, topic]].copy(deep=True)
-                                #     sectors = df[[self._uid, 'ranking', 'topic']].copy(deep=True)
-                                # else:
-                                uids = uids.merge(df[[self._uid, topic, "score"]], on=self._uid, how='outer')
-                                sectors = pd.concat([sectors, df])
-                        uids['n'] = uids[search_strategy[i][j]['topics']].count(axis=1, numeric_only=True)
-                        uids['ranking'] = uids[search_strategy[i][j]['topics']].max(axis=1, numeric_only=True)
-                        # if self.min_relevance > 0:
-                        #     uids = uids[uids['score'] >= self.min_relevance]  ## only returns results above relevance threshold
-                        uids.drop_duplicates(inplace=True)
-                        sectors.sort_values(by=[self._uid, 'score'], ascending=False, inplace=True)
-                        sectors.drop_duplicates(subset=[self._uid], keep='first', inplace=True)
-                        uids = uids.merge(sectors, on=self._uid, how='left')
-                        uids.to_pickle(os.path.join(self._tempdir, '{}{}records_topics.pkl'.format(project_variant_string, i)))
-                        sectors.to_pickle(os.path.join(self._tempdir, '{}{}_raw.pkl'.format(project_variant_string, i)))
+                            )
+                            df_aggregation.to_pickle(outfile)
+                    # lens.aggregation_string = None
+                    # df, df_aggregation, nb_total, max_score = lens.get_lens_data(self._project_start_year, self._project_end_year) 
+                    # outfile = os.path.join(self._tempdir, '{}{}_{}_raw.pkl'.format(
+                    #     project_variant_string,
+                    #     lens.api_type,
+                    #     topic
+                    #     )
+                    # )
+                    # df.to_pickle(outfile)            
+            # for i in search_strategy.keys():  ## iterate on the Lens searches
+            #     if i.isin(['lens_scholarly', 'lens_patents']):
+            #         for j in ['main', 'secondary']:  ## iterate on main or secondary
+            #             for k in search_strategy[i][j]['topics']: # iterates on the topics
+            #                 if i == 'lens_patents':
+            #                     lens = GetLensData(api_configuration= self._api_config_lensp,
+            #                         query_string= None,
+            #                         query_parameters=None, 
+            #                         page_size=100,
+            #                         aggregation_string=None,
+            #                         api_type='patents',
+            #                         api_sort=[{"relevance":"desc"}, {"year_published": "desc"}],
+            #                         api_include= None,
+            #                         api_exclude=None,
+            #                         api_stemming=True,
+            #                         api_regex=False,
+            #                         api_min_score=0         
+            #                     )
+            #                 else:
+            #                     lens = GetLensData(api_configuration= self._api_config_lensp,
+            #                         query_string= None,
+            #                         query_parameters=None, 
+            #                         page_size=1000,
+            #                         aggregation_string=None,
+            #                         api_type='scholarly',
+            #                         api_sort=[{"relevance":"desc"}, {"year_published": "desc"}],
+            #                         api_include= None,
+            #                         api_exclude=None,
+            #                         api_stemming=True,
+            #                         api_regex=False,
+            #                         api_min_score=0 
+            #                     )
+            #                 topic = list(k.keys())[0]
+            #                 lens.query_string = list(k.values())[0]
+            #                 aggregations = search_strategy[i]['aggregations']
+            #                 for agg in aggregations:
+            #                     table = list(agg.keys())[0]
+            #                     lens.aggregation_string = list(agg.values())[0]
+            #                     df, df_aggregation, nb_total, max_score = lens.get_lens_data(self._project_start_year, self._project_end_year) 
+            #                     outfile = os.path.join(self._tempdir, '{}{}_{}_{}.pkl'.format(
+            #                         project_variant_string,
+            #                         lens.api_type,
+            #                         topic,
+            #                         table
+            #                         )
+            #                     )
+            #                     df_aggregation.to_pickle(outfile)
+            #                 if j == 'main':
+            #                     lens.aggregation_string = None
+            #                     df, df_aggregation, nb_total, max_score = lens.get_lens_data(self._project_start_year, self._project_end_year) 
+            #                     outfile = os.path.join(self._tempdir, '{}{}_{}_raw.pkl'.format(
+            #                         project_variant_string,
+            #                         lens.api_type,
+            #                         topic
+            #                         )
+            #                     )
+            #                     df.to_pickle(outfile)
+            # for i in search_strategy.keys():  ## iterate on the Lens searches
+            #     if i.isin(['lens_scholarly', 'lens_patents']):
+            #         for j in ['main', 'secondary']:  ## iterate on main or secondary
+            #             uids = pd.DataFrame()
+            #             sectors = pd.DataFrame()
+            #             for k in search_strategy[i][j]['topics']: # iterates on the topics
+            #                 if i == 'lens_patents':
+            #                     lens.api_type = 'patents'
+            #                 else:
+            #                     lens.api_type = 'scholarly'
+            #                 topic = list(k.keys())[0]
+            #                 for agg in search_strategy[i]['aggregations']:
+            #                     table = list(agg.keys())[0]
+            #                     print(table)
+            #                 if j == 'main':
+            #                     outfile = os.path.join(self._tempdir, '{}{}_{}_raw.pkl'.format(
+            #                         project_variant_string,
+            #                         lens.api_type,
+            #                         topic
+            #                         )
+            #                     )
+            #                     df = pd.read_pickle(outfile)
+            #                     # df.sort_values(by=['uid', 'py', topic], ascending=[False, True, False], inplace=True)  ## remove duplicates when publications are in 2 different years
+            #                     # df.drop_duplicates(subset=['uid'], keep='first', inplace=True)
+            #                     # df['topic'] = topic
+            #                     # # df['ranking'] = df[topic]
+            #                     # if topic == list(search_strategy[i][j]['topics'].keys())[0]:
+            #                     #     uids = df[[self._uid, topic]].copy(deep=True)
+            #                     #     sectors = df[[self._uid, 'ranking', 'topic']].copy(deep=True)
+            #                     # else:
+            #                     uids = uids.merge(df[[self._uid, topic, "score"]], on=self._uid, how='outer')
+            #                     sectors = pd.concat([sectors, df])
+            #             uids['n'] = uids[search_strategy[i][j]['topics']].count(axis=1, numeric_only=True)
+            #             uids['ranking'] = uids[search_strategy[i][j]['topics']].max(axis=1, numeric_only=True)
+            #             # if self.min_relevance > 0:
+            #             #     uids = uids[uids['score'] >= self.min_relevance]  ## only returns results above relevance threshold
+            #             uids.drop_duplicates(inplace=True)
+            #             sectors.sort_values(by=[self._uid, 'score'], ascending=False, inplace=True)
+            #             sectors.drop_duplicates(subset=[self._uid], keep='first', inplace=True)
+            #             uids = uids.merge(sectors, on=self._uid, how='left')
+            #             uids.to_pickle(os.path.join(self._tempdir, '{}{}records_topics.pkl'.format(project_variant_string, i)))
+            #             sectors.to_pickle(os.path.join(self._tempdir, '{}{}_raw.pkl'.format(project_variant_string, i)))
 
-    def pipeline_ddb(self, main_source='lens_scholarly'):
+    def pipeline_ddb(self, main_source='lens_scholarly', network_max_team_size=20):
         """
         Details in ./pipeline_VERSION/README.txt
         """
@@ -503,21 +594,29 @@ class DataPipeLine:
             project_variant_string = ""
         """ Export code """
         source_baseline = os.path.join(self._data_dir, self._baseline_version, "baseline_data.duckdb")
-        if self._uid == 'lens_id':
-            """database setup"""
-            infile = os.path.join(self._root_dir, self._project_name, "config", "search_strategy.yaml")
-            with open(infile, 'r') as f:
-                search_strategy = yaml.safe_load(f)
-            for i in search_strategy.keys():  ## iterate on the Lens searches
-                version_name = "{}{}".format(project_variant_string, i)
-                infile = os.path.join(self._tempdir, '{}_raw.pkl'.format(version_name))
-                if i == main_source:
-                    outfile = os.path.join(self._data_dir, self._project_name, 'project_data.duckdb')
-                    create_ddb(infile, outfile, project_variant_string, source_baseline, source_data=i, network_sample_size= self.network_sample_size) # use the core/ddb_data module
+        """database setup"""
+        infile = os.path.join(self._root_dir, self._project_name, "config", "search_strategy.yaml")
+        infile = os.path.join(self._root_dir, "config", "search_strategy.yaml")
+        search_strategy = load_search_strategy(infile)
+        """ Lens Scholarly data export """
+        ss = search_strategy.loc[(search_strategy.source == main_source) & (search_strategy.category == 'main')]
+        if ss.shape[0] > 0:
+            version_name = "{}{}".format(project_variant_string, main_source)
+            infile = os.path.join(self._tempdir, '{}_raw.pkl'.format(version_name))
+            outfile = os.path.join(self._data_dir, self._project_name, 'project_data.duckdb')
+            create_ddb(infile, outfile, project_variant_string, source_baseline, source_data=main_source, network_max_team_size=20, network_sample_size= self.network_sample_size) # use the core/ddb_data module
+            print("\t\t - Data for {} {} saved into the duckd".format(self._uid, main_source))
+            # with open(infile, 'r') as f:
+            #     search_strategy = yaml.safe_load(f)
+            # for i in search_strategy.keys():  ## iterate on the Lens searches
+            #     version_name = "{}{}".format(project_variant_string, i)
+            #     infile = os.path.join(self._tempdir, '{}_raw.pkl'.format(version_name))
+            #     if i == main_source:
+            #         outfile = os.path.join(self._data_dir, self._project_name, 'project_data.duckdb')
+            #         create_ddb(infile, outfile, project_variant_string, source_baseline, source_data=i, network_sample_size= self.network_sample_size) # use the core/ddb_data module
                 # else:
                 #     outfile = os.path.join(self._data_dir, self._project_name, '{}_data.duckdb'.format(version_name))
                 # create_ddb(infile, outfile, project_variant_string, source_data=i) # use the core/ddb_data module
-                print("\t\t - Data for {} {} saved into the duckd".format(self._uid, i))
             
 
         

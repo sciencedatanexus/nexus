@@ -145,8 +145,8 @@ top10_data <- cleaned_data %>%
     labs( 
       x = "Countries or regions", 
       y = "Count of records",
-      title = "Spread of the scientific publications by countries",
-      subtitle= paste0("Estimates the countries that support this scientific capability (N: ", total_nb, ")."),
+      title = "Largest countries by number of scientific publications from affiliated researchers.",
+      subtitle= paste0("Estimates the countries that support a scientific capability (N: ", total_nb, ")."),
       caption="Brought to you by The Lens.org data."
     )+
     theme_ipsum()

@@ -180,7 +180,7 @@ rplot_cwhatsp1 <- function(
       labs( 
       y = "Count of records",
       # x = "Level",
-      title = "Classification of scolarly publications in scientific domains and disciplines",
+      title = "Classification of scolarly publications in the largest scientific domains and disciplines",
       subtitle= paste0("Estimates the overall capability (N: ", total_nb,", only showing largest groups with n: ",subtotal_nb,")."),
       caption="Brought to you by The Lens.org data."
       ) 

@@ -62,15 +62,22 @@ def retry(query, f_headers=None, max_tries=10):
             return resp
 
 
-def request_retry(f_query, f_headers=None, f_method='GET', f_url=None, max_tries=10):
+def request_retry(f_query, f_headers=None, f_method='GET', f_url=None, max_tries=10, sleep_sec=0.3):
+    def api_request():
+        if f_method == 'POST':
+            api_resp = request_query_post(f_method, f_url, f_query, f_headers)
+        else:
+            api_resp = request_query(f_query, f_headers)
+        return api_resp
     for i in range(max_tries):
         try:
-            sleep(0.3)
-            if f_method == 'POST':
-                resp = request_query_post(f_method, f_url, f_query, f_headers)
-            else:
-                resp = request_query(f_query, f_headers)
-            break
+            sleep(sleep_sec)
+            resp = api_request()
+            # if f_method == 'POST':
+            #     resp = request_query_post(f_method, f_url, f_query, f_headers)
+            # else:
+            #     resp = request_query(f_query, f_headers)
+            # break
         except requests.exceptions.RequestException:
             continue
         finally:

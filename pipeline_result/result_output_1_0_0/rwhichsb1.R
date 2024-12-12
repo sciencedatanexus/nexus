@@ -62,24 +62,23 @@ conn <- dbConnect(duckdb(), dbdir = data_file, read_only = TRUE)
 # List of publications with collaboration data
 edges <- tbl(conn, 'project.net_org_edges') %>%
   # filter_scholarly_records(input_years_evolution[1], input_years_evolution[2]) %>%
-  filter(to != from) %>%
+  filter(is_ext == TRUE) %>%
+  filter(if (!is.null(top_collaboration_limit)) weight >= top_collaboration_limit else TRUE) %>%
   collect()
+# summary(edges)
 nodes <- tbl(conn, 'project.net_org_nodes') %>% 
   collect()
-if (!is.null(top_collaboration_limit)){
-  edges <- edges %>% 
-    filter(weight > top_collaboration_limit) 
-}
+# summary(nodes)
 nodes <- nodes %>% 
   filter(org_id %in% unique(c(edges$from, edges$to)))
+# summary(nodes)
 nodes_map <- tbl(conn, 'project.locations') %>% 
   rename('city' = 'name') %>%
   collect()
 nodes_map <- nodes_map %>%
   filter(org_id %in% unique(c(edges$from, edges$to))) %>%
-  inner_join(select(nodes, org_id, name, nb_ids), by = 'org_id') %>%
+  inner_join(select(nodes, org_id, name, nb_records, nb_contributions), by = 'org_id') %>%
   group_by(id) %>%
-  mutate(nb_records = sum(nb_ids)) %>%
   ungroup()
 edges_map <- edges %>% 
   filter((to %in% unique(nodes_map$org_id)) & (from %in% unique(nodes_map$org_id)))
@@ -100,15 +99,9 @@ dbDisconnect(conn, shutdown = TRUE)
 # ==============================================================================
 
 # Generate summary statistics for the cleaned data
-# summary_stats <- cleaned_data %>%
-#   summarise(
-#     avg_age = mean(age, na.rm = TRUE),
-#     median_income = median(income, na.rm = TRUE),
-#     survey_count = n()
-#   )
 country_metrics <- nodes_map %>% group_by(country_code)%>%
   summarise(
-    nb_records = n()
+    nb_org = n()
   )
 countries <- sf::read_sf(file.path(baseline_directory, "countries.geojson"))
 country_data <- countries %>%
@@ -131,7 +124,7 @@ total_nb <- format(nrow(edges_map), big.mark = ",", scientific = FALSE)
 # eda_plot <- network_visualization(nodes, edges)
 # eda_plot <- network_visualization_map(nodes_map, edges_map)
 # eda_plot <- network_visualization(organisations, cleaned_data, 10)
-max_rec <- max(country_data$nb_records)
+max_rec <- max(country_data$nb_org)
   min_value <- 1
 bins <- c(
   min_value , 
@@ -140,20 +133,20 @@ bins <- c(
   ceiling(max_rec/2)+min_value , 
   max_rec
 )
-pal <- colorBin("Oranges", domain = country_data$nb_records, bins = bins)
+pal <- colorBin("Oranges", domain = country_data$nb_org, bins = bins)
 # print(bins)
 labels <- sprintf(
-  "<strong>%s</strong><br/>%s records",
-  country_data$ADMIN, format(country_data$nb_records, big.mark = ",", scientific = FALSE)
+  "<strong>%s</strong><br/>%s organisations",
+  country_data$ADMIN, format(country_data$nb_org, big.mark = ",", scientific = FALSE)
 ) %>% lapply(htmltools::HTML)
 labels_markers <- sprintf(
-  "<strong><a class=\"mega-menu-link\" href=\"%s\">%s</a></strong><br/>%s records",
-  nodes_map$id, nodes_map$name, format(nodes_map$nb_records, big.mark = ",", scientific = FALSE)
+  "<strong>%s</strong><br/>%s records",
+  nodes_map$name, format(nodes_map$nb_records, big.mark = ",", scientific = FALSE)
 ) %>% lapply(htmltools::HTML)
 eda_plot <- leaflet(country_data) %>%
   addTiles() %>%
   addProviderTiles(providers$CartoDB.Positron) %>%  # list at https://rstudio.github.io/leaflet/reference/providers.html
-  setView(lng = 135, lat = -20, zoom = 2) %>%
+  setView(lng = 135, lat = -15, zoom = 2) %>%
   addMarkers(
     clusterOptions = markerClusterOptions(),
     data = nodes_map,
@@ -161,7 +154,7 @@ eda_plot <- leaflet(country_data) %>%
   ) %>%
   # addPolylines(lng = nodes_map$lng, lat = nodes_map$lat)
   addPolygons(
-      fillColor = ~pal(nb_records),
+      fillColor = ~pal(nb_org),
       weight = 0.5,
       opacity = 1,
       color = "grey",
@@ -180,7 +173,7 @@ eda_plot <- leaflet(country_data) %>%
           textsize = "15px",
           direction = "auto")
       ) %>%
-      leaflet::addLegend(pal = pal, values = ~nb_records, opacity = 0.7, title = NULL,
+      leaflet::addLegend(pal = pal, values = ~nb_org, opacity = 0.7, title = NULL,
       position = "bottomright") ## needs the latest version of xts to work (Error in get: object '.xts_chob' not found)
     
 # Display the plot
@@ -198,14 +191,14 @@ data_table <- edges_map %>%
   mutate(
       weight = round(weight, 1)
       ) %>%
-  inner_join(select(nodes_map, org_id, name, nb_records), by=c("from" = "org_id")) %>%
+  inner_join(select(nodes_map, org_id, name, nb_records), by=c("from" = "org_id"), relationship = "many-to-many") %>%
   mutate(from =name) %>%
   select(-name) %>%
-  rename("Total count of record by organisation 1" = "nb_records") %>%
-  inner_join(select(nodes_map, org_id, name, nb_records), by=c("to" = "org_id")) %>%
+  rename("Total count of records by organisation 1" = "nb_records") %>%
+  inner_join(select(nodes_map, org_id, name, nb_records), by=c("to" = "org_id"), relationship = "many-to-many") %>%
   mutate(to =name) %>%
   select(-name) %>%
-  rename("Total count of record by organisation 2" = "nb_records") %>%
+  rename("Total count of records by organisation 2" = "nb_records") %>%
   rename(
       "Organisation 1"="from",
       "Organisation 2"="to",
