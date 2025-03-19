@@ -1,0 +1,40 @@
+lens_scholarly:
+  unification:
+    thesaurus:
+        - publication_type:
+            name: Record type unification
+            value:
+                ja:
+                    name: journal article
+                    value: [journal article, journal, journal volume, journal issue]
+                bc:
+                    name: book chapter
+                    value: [book chapter]
+                pp:
+                    name: preprint
+                    value: [preprint]
+                db:
+                    name: dataset
+                    value: [dataset]
+                cp:
+                    name: conference proceedings article
+                    value: [conference proceedings article]
+                rv:
+                    name: review
+                    value: [review]
+                nt:
+                    name: ntro
+                    value: [other, dissertation, standard, reference entry, component, conference proceedings, unknown, retraction notice, working paper]
+                bk:
+                    name: book
+                    value: [book]
+                rp: 
+                    name: report
+                    value: [report]
+                ed:
+                    name: editorial content
+                    value: [editorial, letter, news]
+                ct:
+                    name: clinical trial
+                    value: [clinical trial, clinical study]    
+                        

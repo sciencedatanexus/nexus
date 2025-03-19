@@ -1,0 +1,4 @@
+msgid "publication_type_ja"
+msgid_plural "publication_type_ja_plural"
+msgstr[0] "Article Scientifique"
+msgstr[1] "Articles Scientifiques"

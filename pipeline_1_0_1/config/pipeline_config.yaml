@@ -1,0 +1,40 @@
+lens_scholarly:
+  unification:
+    thesaurus:
+        - publication_type:
+            name: Record type unification
+            value:
+                ja:
+                    label: Journal Article
+                    source_types: [journal article, journal, journal volume, journal issue]
+                bc:
+                    label: Book Chapter
+                    source_types: [book chapter]
+                pp:
+                    label: Preprint
+                    source_types: [preprint]
+                db:
+                    label: Dataset
+                    source_types: [dataset]
+                cp:
+                    label: Conference Article
+                    source_types: [conference proceedings article]
+                rv:
+                    label: Review
+                    source_types: [review]
+                nt:
+                    label: Non-traditional research output (NTRO)
+                    source_types: [other, dissertation, standard, reference entry, component, conference proceedings, unknown, retraction notice, working paper]
+                bk:
+                    label: Book
+                    source_types: [book]
+                gl:
+                    label: Grey Literature
+                    source_types: [report]
+                ed:
+                    label: Editorial
+                    source_types: [editorial, letter, news]
+                ct:
+                    label: Clinical Trial
+                    source_types: [clinical trial, clinical study]
+                        
